@@ -4,6 +4,10 @@
 
 #include "yaml/yaml.h"
 
+#include <json-toolkit/parsing.h>
+
+#include <algorithm>
+
 namespace yaml
 {
 
@@ -90,10 +94,10 @@ private:
 
   json::Json parseValue(const int indent);
 
-  static std::vector<std::string> extractFields(const std::string& str);
   static json::Object parseObject(std::string str);
   static json::Array parseArray(std::string str);
   static json::Json parseString(std::string str);
+  static json::Json parsePropertyValue(const std::string& str);
 
   static int computeIndent(const std::string& str);
   static int readPropertyName(const std::string& str, int indent);
@@ -147,8 +151,6 @@ json::Json Parser::parseValue(const int indent)
     {
       assert(currentLine().at(currentIndent() * 2) == '-');
 
-      /// TODO: problem
-      //currentline[currentindent * 2] = ' ';
       m_currentindent += 1;
       json::Json elem = parseValue(indent + 1);
       result.push(elem);
@@ -173,8 +175,8 @@ json::Json Parser::parseValue(const int indent)
     return ret;
   }
 
-  int colon = readPropertyName(currentLine(), currentIndent());
-  if (colon != -1)
+  int top_level_colon = readPropertyName(currentLine(), currentIndent());
+  if (top_level_colon != -1)
   {
     // Parse object
     json::Object result{};
@@ -211,7 +213,7 @@ json::Json Parser::parseValue(const int indent)
       else
       {
         // name: value
-        property_value = parseString(std::string(currentLine().begin() + colon + 1, currentLine().end()));
+        property_value = parsePropertyValue(trimmed(std::string(currentLine().begin() + colon + 1, currentLine().end())));
         nextOrDone();
       }
 
@@ -223,81 +225,20 @@ json::Json Parser::parseValue(const int indent)
   }
   else
   {
-    // Parse string
-    auto ret = parseString(std::string(currentLine().begin() + currentIndent(), currentLine().end()));
+    auto ret = parsePropertyValue(std::string(currentLine().begin() + 2*currentIndent(), currentLine().end()));
     nextOrDone();
     return ret;
   }
 }
 
-std::vector<std::string> Parser::extractFields(const std::string& str)
-{
-  std::vector<std::string> result;
-
-  size_t begin = 0;
-  size_t it = 0;
-
-  bool inside_quotes = false;
-
-  while (it != str.length())
-  {
-    auto c = str.at(it);
-    if (c == ',' && !inside_quotes)
-    {
-      result.push_back(std::string(str.begin() + begin, str.begin() + it));
-      begin = it + 1;
-    }
-    else if (c == '"')
-    {
-      inside_quotes = !inside_quotes;
-    }
-
-    ++it;
-  }
-
-  assert(!inside_quotes);
-  result.push_back(std::string(str.begin() + begin, str.begin() + it));
-  return result;
-}
-
 json::Object Parser::parseObject(std::string str)
 {
-  // Remove '{' and '}'
-  str = std::string(str.begin() + 1, str.end() - 1);
-
-  json::Object result{};
-
-  std::vector<std::string> fields = extractFields(str);
-
-  for (std::string f : fields)
-  {
-    f = trimmed(f);
-    const size_t colon = f.find(':');
-    std::string property_name = std::string(f.begin(), f.begin() + colon);
-    json::Json property_value = parseString(std::string(f.begin() + colon + 2, f.end()));
-
-    result[property_name] = property_value;
-  }
-
-  return result;
+  return json::parse(str).toObject();
 }
 
 json::Array Parser::parseArray(std::string str)
 {
-  // Remove '[' and ']'
-  str = std::string(str.begin() + 1, str.end() - 1);
-
-  json::Array result{};
-
-  std::vector<std::string> fields = extractFields(str);
-
-  for (std::string f : fields)
-  {
-    f = trimmed(f);
-    result.push(parseString(f));
-  }
-
-  return result;
+  return json::parse(str).toArray();
 }
 
 json::Json Parser::parseString(std::string str)
@@ -310,6 +251,19 @@ json::Json Parser::parseString(std::string str)
   }
 
   return json::Json{ str };
+}
+
+json::Json Parser::parsePropertyValue(const std::string& str)
+{
+  if (str.size() >= 2 && str.front() == '"' && str.back() == '"')
+    return parseString(str);
+
+  const bool is_all_digit = std::all_of(str.begin(), str.end(), is_digit);
+
+  if (is_all_digit)
+    return std::stoi(str);
+  else
+    return parseString(str);
 }
 
 int Parser::computeIndent(const std::string& str)
