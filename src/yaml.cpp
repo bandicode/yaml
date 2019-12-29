@@ -7,6 +7,29 @@
 namespace yaml
 {
 
+inline static bool is_space(char c)
+{
+  return c == ' ' || c == '\t';
+}
+
+inline static bool is_digit(char c) { return c >= '0' && c <= '9'; }
+inline static bool is_letter(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
+inline static bool is_letter_or_number(char c) { return is_digit(c) || is_letter(c); }
+
+static std::string trimmed(const std::string& str)
+{
+  size_t i = 0;
+  while (i < str.size() && is_space(str.at(i))) ++i;
+
+  size_t j = str.size();
+  while (j-- > 0 && is_space(str.at(j)));
+
+  if (j == std::numeric_limits<size_t>::max())
+    return {};
+
+  return std::string(str.begin() + i, str.begin() + j + 1);
+}
+
 struct Stream
 {
   int m_pos = 0;
@@ -21,7 +44,7 @@ struct Stream
   void reset(const std::string& str)
   {
     m_pos = 0;
-    m_length = StringBackend::strlength(str);
+    m_length = static_cast<int>(str.size());
     m_text = &str;
   }
 
@@ -29,9 +52,14 @@ struct Stream
 
   std::string  readLine()
   {
-    int n = StringBackend::index_of(StringBackend::new_line(), text(), pos());
-    std::string  result = StringBackend::mid(text(), pos(), n);
-    m_pos = (n == -1 ? length() : m_pos + n + 1);
+    size_t n = text().find('\n', pos());
+
+    if (n == std::string::npos)
+      n = text().size();
+
+    std::string result{ text().begin() + pos(), text().begin() + n };
+    m_pos = n == text().size() ? n : (n+1);
+
     return result;
   }
 };
@@ -62,7 +90,7 @@ private:
 
   json::Json parseValue(const int indent);
 
-  static std::vector<std::string > extractFields(const std::string& str);
+  static std::vector<std::string> extractFields(const std::string& str);
   static json::Object parseObject(std::string str);
   static json::Array parseArray(std::string str);
   static json::Json parseString(std::string str);
@@ -90,8 +118,8 @@ bool Parser::hasNext() const
 void Parser::getNext()
 {
   m_currentline = stream().readLine();
-  while (m_currentline.size() > 0 && StringBackend::is_space(m_currentline.back()))
-    StringBackend::chop(m_currentline, 1);
+  while (m_currentline.size() > 0 && is_space(m_currentline.back()))
+    m_currentline.pop_back();
   m_currentindent = computeIndent(m_currentline);
 }
 
@@ -131,14 +159,16 @@ json::Json Parser::parseValue(const int indent)
   else if (currentLine().at(currentIndent() * 2) == '{')
   {
     // Inline object
-    json::Json ret = parseObject(StringBackend::trimmed(StringBackend::mid(currentLine(), currentIndent() * 2)));
+    auto substr = std::string(currentLine().begin() + currentIndent() * 2, currentLine().end());
+    json::Json ret = parseObject(trimmed(substr));
     nextOrDone();
     return ret;
   }
   else if (currentLine().at(currentIndent() * 2) == '[')
   {
     // Inline array
-    json::Json ret = parseArray(StringBackend::trimmed(StringBackend::mid(currentLine(), currentIndent() * 2)));
+    auto substr = std::string(currentLine().begin() + currentIndent() * 2, currentLine().end());
+    json::Json ret = parseArray(trimmed(substr));
     nextOrDone();
     return ret;
   }
@@ -152,7 +182,7 @@ json::Json Parser::parseValue(const int indent)
     do
     {
       int colon = readPropertyName(currentLine(), currentIndent());
-      std::string  property_name = StringBackend::mid(currentLine(), currentIndent() * 2, colon - currentIndent() * 2);
+      std::string  property_name = std::string(currentLine().begin() + currentIndent() * 2, currentLine().begin() + colon);
       json::Json property_value{ nullptr };
 
       if (currentLine().back() == ':')
@@ -163,8 +193,8 @@ json::Json Parser::parseValue(const int indent)
       else if (currentLine().back() == '}' && currentLine().at(colon + 2) == '{')
       {
         // name: {...}
-        const int opening_brace = StringBackend::index_of('{', currentLine(), colon);
-        std::string  subobject = StringBackend::mid(currentLine(), opening_brace);
+        const size_t opening_brace = currentLine().find('{', colon);
+        std::string subobject = std::string(currentLine().begin() + opening_brace, currentLine().end());
         property_value = parseObject(subobject);
 
         nextOrDone();
@@ -172,8 +202,8 @@ json::Json Parser::parseValue(const int indent)
       else if (currentLine().back() == ']' && currentLine().at(colon + 2) == '[')
       {
         // name: [...]
-        const int opening_bracket = StringBackend::index_of('[', currentLine(), colon);
-        std::string  subarray = StringBackend::mid(currentLine(), opening_bracket);
+        const size_t opening_bracket = currentLine().find('[', colon);
+        std::string  subarray = std::string(currentLine().begin() + opening_bracket, currentLine().end());
         property_value = parseArray(subarray);
 
         nextOrDone();
@@ -181,7 +211,7 @@ json::Json Parser::parseValue(const int indent)
       else
       {
         // name: value
-        property_value = parseString(StringBackend::mid(currentLine(), colon + 1));
+        property_value = parseString(std::string(currentLine().begin() + colon + 1, currentLine().end()));
         nextOrDone();
       }
 
@@ -194,18 +224,18 @@ json::Json Parser::parseValue(const int indent)
   else
   {
     // Parse string
-    auto ret = parseString(StringBackend::mid(currentLine(), currentIndent()));
+    auto ret = parseString(std::string(currentLine().begin() + currentIndent(), currentLine().end()));
     nextOrDone();
     return ret;
   }
 }
 
-std::vector<std::string > Parser::extractFields(const std::string& str)
+std::vector<std::string> Parser::extractFields(const std::string& str)
 {
-  std::vector<std::string > result;
+  std::vector<std::string> result;
 
-  int begin = 0;
-  int it = 0;
+  size_t begin = 0;
+  size_t it = 0;
 
   bool inside_quotes = false;
 
@@ -214,7 +244,7 @@ std::vector<std::string > Parser::extractFields(const std::string& str)
     auto c = str.at(it);
     if (c == ',' && !inside_quotes)
     {
-      result.push_back(StringBackend::mid(str, begin, it - begin));
+      result.push_back(std::string(str.begin() + begin, str.begin() + it));
       begin = it + 1;
     }
     else if (c == '"')
@@ -226,27 +256,25 @@ std::vector<std::string > Parser::extractFields(const std::string& str)
   }
 
   assert(!inside_quotes);
-  result.push_back(StringBackend::mid(str, begin, it - begin));
+  result.push_back(std::string(str.begin() + begin, str.begin() + it));
   return result;
 }
 
-json::Object Parser::parseObject(std::string  str)
+json::Object Parser::parseObject(std::string str)
 {
-  // Remove '}'
-  StringBackend::chop(str, 1);
-  // Remove '{'
-  str = StringBackend::mid(str, 1);
+  // Remove '{' and '}'
+  str = std::string(str.begin() + 1, str.end() - 1);
 
   json::Object result{};
 
-  std::vector<std::string > fields = extractFields(str);
+  std::vector<std::string> fields = extractFields(str);
 
   for (std::string f : fields)
   {
-    f = StringBackend::trimmed(f);
-    const int colon = StringBackend::index_of(':', f);
-    std::string  property_name = StringBackend::mid(f, 0, colon);
-    json::Json property_value = parseString(StringBackend::mid(f, colon + 2));
+    f = trimmed(f);
+    const size_t colon = f.find(':');
+    std::string property_name = std::string(f.begin(), f.begin() + colon);
+    json::Json property_value = parseString(std::string(f.begin() + colon + 2, f.end()));
 
     result[property_name] = property_value;
   }
@@ -254,34 +282,31 @@ json::Object Parser::parseObject(std::string  str)
   return result;
 }
 
-json::Array Parser::parseArray(std::string  str)
+json::Array Parser::parseArray(std::string str)
 {
-  // Remove ']'
-  StringBackend::chop(str, 1);
-  // Remove '['
-  str = StringBackend::mid(str, 1);
+  // Remove '[' and ']'
+  str = std::string(str.begin() + 1, str.end() - 1);
 
   json::Array result{};
 
-  std::vector<std::string > fields = extractFields(str);
+  std::vector<std::string> fields = extractFields(str);
 
   for (std::string f : fields)
   {
-    f = StringBackend::trimmed(f);
+    f = trimmed(f);
     result.push(parseString(f));
   }
 
   return result;
 }
 
-json::Json Parser::parseString(std::string  str)
+json::Json Parser::parseString(std::string str)
 {
-  str = StringBackend::trimmed(str);
+  str = trimmed(str);
 
   if (str.back() == '"')
   {
-    StringBackend::chop(str, 1);
-    str = StringBackend::mid(str, 1);
+    str = std::string(str.begin() + 1, str.end() - 1);
   }
 
   return json::Json{ str };
@@ -290,7 +315,7 @@ json::Json Parser::parseString(std::string  str)
 int Parser::computeIndent(const std::string& str)
 {
   size_t i = 0;
-  while (i < str.length() && StringBackend::is_space(str.at(i)))
+  while (i < str.length() && is_space(str.at(i)))
     ++i;
   return static_cast<int>(i) / 2;
 }
@@ -298,7 +323,7 @@ int Parser::computeIndent(const std::string& str)
 int Parser::readPropertyName(const std::string& str, int indent)
 {
   size_t i = 2 * indent;
-  while (i < str.length() && (StringBackend::is_letter_or_number(str.at(i))))
+  while (i < str.length() && is_letter_or_number(str.at(i)))
     ++i;
 
   if (i == str.length() || str.at(i) != ':')

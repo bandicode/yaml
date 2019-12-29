@@ -15,6 +15,4 @@
 #define YAML_API
 #endif
 
-#include "yaml/yaml-string-backend.h"
-
 #endif // YAML_GLOBAL_DEFS_H

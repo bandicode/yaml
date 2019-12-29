@@ -1,5 +1,5 @@
 // Copyright (C) 2019 Vincent Chambrin
-// This file is part of the liquid project
+// This file is part of the yaml project
 // For conditions of distribution and use, see copyright notice in LICENSE
 
 #include "yaml/yaml.h"
