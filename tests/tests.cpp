@@ -16,4 +16,5 @@ TEST(Yaml, hello) {
 
   ASSERT_TRUE(val.isObject());
   ASSERT_EQ(val["name"], "Bob");
+  ASSERT_EQ(val["age"], "20");
 }
